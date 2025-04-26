@@ -1,0 +1,213 @@
+/* GitHub Publisher Plugin Styles */
+
+/* Publish Center Modal */
+.github-publisher-modal {
+  width: 70%;
+  max-width: 900px;
+  max-height: 80vh;
+}
+
+.github-publisher-modal h2 {
+  text-align: center;
+  margin-bottom: 15px;
+  border-bottom: 1px solid var(--background-modifier-border);
+  padding-bottom: 10px;
+}
+
+.github-publisher-warning {
+  background-color: rgba(var(--color-red-rgb), 0.1);
+  color: var(--text-error);
+  padding: 10px;
+  border-radius: 5px;
+  margin-bottom: 15px;
+  border-left: 3px solid var(--text-error);
+}
+
+.github-publisher-button {
+  background-color: var(--interactive-accent);
+  color: var(--text-on-accent);
+  padding: 6px 12px;
+  border-radius: 4px;
+  margin: 10px 0;
+  font-size: 14px;
+  display: block;
+  width: fit-content;
+  cursor: pointer;
+  border: none;
+}
+
+.github-publisher-button:hover {
+  filter: brightness(1.1);
+}
+
+.github-publisher-button:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
+.github-publisher-status {
+  background-color: var(--background-secondary);
+  padding: 10px;
+  border-radius: 4px;
+  margin: 10px 0;
+}
+
+.github-publisher-notes-list {
+  max-height: 400px;
+  overflow-y: auto;
+  margin: 10px 0;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+}
+
+.github-publisher-note-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px;
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.github-publisher-note-item:last-child {
+  border-bottom: none;
+}
+
+/* Note Info Section */
+.github-publisher-note-info {
+  flex-grow: 1;
+  margin-right: 10px;
+  overflow: hidden;
+}
+
+.github-publisher-note-title {
+  font-weight: bold;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  overflow: hidden;
+}
+
+.github-publisher-note-path {
+  font-size: 12px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  overflow: hidden;
+}
+
+/* Note Status Icon */
+.github-publisher-note-status {
+  margin-right: 10px;
+  color: var(--text-accent);
+}
+
+.github-publisher-published {
+  color: var(--color-green);
+}
+
+/* Note Actions */
+.github-publisher-note-actions {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.github-publisher-publish-button {
+  background-color: var(--interactive-accent);
+  color: var(--text-on-accent);
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  cursor: pointer;
+  border: none;
+}
+
+.github-publisher-open-button {
+  background-color: var(--background-modifier-border);
+  color: var(--text-normal);
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  cursor: pointer;
+  border: none;
+}
+
+.github-publisher-empty {
+  font-style: italic;
+  color: var(--text-muted);
+  padding: 10px;
+  text-align: center;
+}
+
+/* Ribbon Icon */
+.github-publisher-ribbon-class {
+  color: var(--text-accent);
+}
+
+/* Connection Status */
+.github-publisher-connection-status {
+  padding: 10px;
+  border-radius: 4px;
+  margin-bottom: 15px;
+}
+
+.github-publisher-connected-banner {
+  background-color: rgba(var(--color-green-rgb), 0.1);
+  color: var(--text-normal);
+  border-left: 3px solid var(--color-green);
+}
+
+.github-publisher-disconnected-banner {
+  background-color: rgba(var(--color-red-rgb), 0.1);
+  color: var(--text-normal);
+  border-left: 3px solid var(--color-red);
+}
+
+.github-publisher-connected-icon {
+  color: var(--color-green);
+  margin: 0 5px;
+}
+
+.github-publisher-disconnected-icon {
+  color: var(--color-red);
+  margin: 0 5px;
+}
+
+/* Status Bar */
+.github-publisher-status-icon {
+  margin-left: 5px;
+}
+
+.github-publisher-connected {
+  color: var(--color-green);
+}
+
+.github-publisher-disconnected {
+  color: var(--color-red);
+}
+
+/* Search Container */
+.github-publisher-search-container {
+  display: flex;
+  align-items: center;
+  margin: 10px 0;
+}
+
+.github-publisher-search-label {
+  margin-right: 10px;
+}
+
+.github-publisher-search-input {
+  flex-grow: 1;
+  padding: 8px;
+  border-radius: 4px;
+  border: 1px solid var(--background-modifier-border);
+  background-color: var(--background-primary);
+  color: var(--text-normal);
+}
+
+/* Actions Container */
+.github-publisher-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin: 10px 0;
+}
