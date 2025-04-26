@@ -3,7 +3,7 @@
 	"name": "GitHub Publisher",
 	"version": "1.0.0",
 	"minAppVersion": "0.15.0",
-	"description": "Publish your Obsidian notes to GitHub repository with selective folder publishing support",
+	"description": "Publish your notes to GitHub repository with selective folder publishing support",
 	"author": "Your Name",
 	"authorUrl": "https://github.com/yourusername",
 	"isDesktopOnly": false
