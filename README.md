@@ -24,7 +24,7 @@ This Obsidian plugin allows you to automatically publish your Markdown notes wit
 4. Enable the GitHub Publisher plugin
 
 ### Method 2: Manual Installation
-1. Download the latest release from the [releases page](https://github.com/yourusername/obsidian-github-publisher/releases)
+1. Download the latest release from the [releases page](https://github.com/msavdert/obsidian-github-publisher/releases)
 2. Extract the ZIP file into your Obsidian plugins folder: `{vault}/.obsidian/plugins/`
 3. Ensure you have a folder called `obsidian-github-publisher` containing the plugin files
 4. Restart Obsidian and enable the plugin in Settings > Community plugins
@@ -33,7 +33,7 @@ This Obsidian plugin allows you to automatically publish your Markdown notes wit
 For beta testers and early adopters:
 1. Install the [BRAT plugin](https://github.com/TfTHacker/obsidian42-brat) from Obsidian's Community Plugins
 2. Open BRAT settings and click "Add Beta Plugin"
-3. Enter the repository URL: `https://github.com/yourusername/obsidian-github-publisher`
+3. Enter the repository URL: `https://github.com/msavdert/obsidian-github-publisher`
 4. Enable the plugin in Settings > Community plugins
 
 ## Configuration
@@ -150,7 +150,7 @@ The note "Türkçe İçerik Başlığı.md" would be published as "turkce-icerik
 
 ## Support and Development
 
-For issues, feature requests, or contributions, please visit [our GitHub repository](https://github.com/yourusername/obsidian-github-publisher).
+For issues, feature requests, or contributions, please visit [our GitHub repository](https://github.com/msavdert/obsidian-github-publisher).
 
 ## License
 
