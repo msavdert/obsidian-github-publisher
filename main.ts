@@ -23,6 +23,8 @@ interface PublisherSettings {
 	useFileHistory: boolean; // Track file history when name changes
 	formatFilename: boolean; // Format filename to be URL-friendly
 	languageSuffixKey: string; // Frontmatter key to specify language suffix
+	imagesFolder: string; // GitHub'daki resimler için hedef klasör
+	processImages: boolean; // Notlardaki resimleri işleyip ayrı klasöre yükleme
 }
 
 const DEFAULT_SETTINGS: PublisherSettings = {
@@ -35,7 +37,9 @@ const DEFAULT_SETTINGS: PublisherSettings = {
 	publishedNotes: {},
 	useFileHistory: true,
 	formatFilename: false,
-	languageSuffixKey: 'lang'
+	languageSuffixKey: 'lang',
+	imagesFolder: 'assets/images',
+	processImages: true
 }
 
 export default class GithubPublisherPlugin extends Plugin {
@@ -296,13 +300,52 @@ export default class GithubPublisherPlugin extends Plugin {
 
 		try {
 			// Dosya içeriğini oku
-			const content = await this.app.vault.read(file);
+			let content = await this.app.vault.read(file);
 			
 			// İçerik hash'ini hesapla (dosya takibi için)
 			const contentHash = this.calculateContentHash(content);
 			
-			// GitHub'daki hedef yolu belirle
-			const targetPath = this.getTargetPath(file);
+			// Markdown içerisindeki resimleri işle
+			if (this.settings.processImages) {
+				const processResult = await this.processAndUploadImages(file, content);
+				content = processResult.content;
+				
+				if (processResult.uploadedImages > 0) {
+					new Notice(`Uploaded ${processResult.uploadedImages} images to ${this.settings.imagesFolder}`);
+				}
+			}
+			
+			// GitHub'daki hedef yolu belirle - Frontmatter'dan veya dosya adından Title çıkar
+			// Başlık Frontmatter'dan çıkarılır
+			const frontmatter = this.app.metadataCache.getFileCache(file)?.frontmatter;
+			let title = '';
+			
+			if (frontmatter && frontmatter.title) {
+				title = frontmatter.title;
+			} else {
+				// Başlığı dosya adından al (uzantıyı çıkar)
+				title = file.basename;
+			}
+			
+			// İngilizce başlık çevirisi (frontmatter veya dosya adından)
+			let filenameForPath = '';
+			if (frontmatter && frontmatter.slug) {
+				// Eğer frontmatter'da özel slug tanımlanmışsa kullan
+				filenameForPath = frontmatter.slug + '.md';
+			} else {
+				// Başlığı Türkçe karakterleri İngilizce karakterlere çevirerek kullan
+				filenameForPath = this.formatFilenameAsSlug(title + '.md');
+			}
+			
+			// Geçici olarak dosya adını değiştir (sadece hedef yolu çıkarmak için)
+			const originalName = file.name;
+			const tempFile = {
+				...file,
+				name: filenameForPath
+			} as TFile;
+			
+			// Hedef yolu hesapla
+			const targetPath = this.getTargetPath(tempFile);
 			
 			// Eğer dosya adı değiştiyse önceki yayınlanmış dosyayı bulmaya çalış
 			let previousPath: string | null = null;
@@ -383,7 +426,7 @@ export default class GithubPublisherPlugin extends Plugin {
 			// Yayınlanmış not olarak kaydet (content hash ile)
 			await this.markNoteAsPublished(file.path, contentHash);
 			
-			new Notice(`Successfully published ${file.name} to GitHub!`);
+			new Notice(`Successfully published ${file.name} to GitHub as ${targetPath}!`);
 		} catch (error) {
 			console.error('Error publishing note:', error);
 			new Notice(`Failed to publish ${file.name}. Error: ${error.message}`);
@@ -445,6 +488,9 @@ export default class GithubPublisherPlugin extends Plugin {
 		// Remove file extension
 		let name = filename.replace(/\.md$/, '');
 		
+		// Transliterate non-English characters
+		name = this.transliterateText(name);
+		
 		// Convert to lowercase
 		name = name.toLowerCase();
 		
@@ -456,6 +502,32 @@ export default class GithubPublisherPlugin extends Plugin {
 		
 		// Add .md extension back
 		return name + '.md';
+	}
+	
+	// Transliterate text from non-English characters to English equivalents
+	transliterateText(text: string): string {
+		const charMap: Record<string, string> = {
+			'ç': 'c', 'Ç': 'C',
+			'ğ': 'g', 'Ğ': 'G',
+			'ı': 'i', 'İ': 'I',
+			'ö': 'o', 'Ö': 'O',
+			'ş': 's', 'Ş': 'S',
+			'ü': 'u', 'Ü': 'U',
+			'â': 'a', 'Â': 'A',
+			'î': 'i', 'Î': 'I',
+			'û': 'u', 'Û': 'U',
+			'é': 'e', 'É': 'E',
+			'è': 'e', 'È': 'E',
+			'à': 'a', 'À': 'A',
+			'ñ': 'n', 'Ñ': 'N',
+			'ß': 'ss',
+			'å': 'a', 'Å': 'A',
+			'ä': 'a', 'Ä': 'A',
+			'æ': 'ae', 'Æ': 'AE'
+			// Daha fazla karakter eklenebilir
+		};
+		
+		return text.replace(/[çÇğĞıİöÖşŞüÜâÂîÎûÛéÉèÈàÀñÑßåÅäÄæÆ]/g, match => charMap[match] || match);
 	}
 	
 	// Get language suffix from frontmatter if available
@@ -481,6 +553,115 @@ export default class GithubPublisherPlugin extends Plugin {
 		
 		// Add language suffix and .md extension back
 		return `${name}.${languageSuffix}.md`;
+	}
+
+	// Notta içerilen resim bağlantılarını çıkarmak için
+	extractImageLinks(content: string): string[] {
+		// Markdown resim syntax'ını bulma: ![alt text](image-path.png)
+		const imageRegex = /!\[.*?\]\((.*?)\)/g;
+		const imageLinks: string[] = [];
+		let match;
+		
+		while ((match = imageRegex.exec(content)) !== null) {
+			if (match[1] && !match[1].startsWith('http')) {
+				// Sadece lokal resim dosyalarını işle, uzak URL'leri değil
+				imageLinks.push(match[1]);
+			}
+		}
+		
+		return imageLinks;
+	}
+	
+	// Markdown içeriğindeki resim yollarını GitHub'daki yeni yollarla değiştir
+	updateImagePathsInMarkdown(content: string, imagePathMap: Record<string, string>): string {
+		let updatedContent = content;
+		const imageRegex = /!\[.*?\]\((.*?)\)/g;
+		
+		let match;
+		while ((match = imageRegex.exec(content)) !== null) {
+			const originalPath = match[1];
+			if (originalPath in imagePathMap) {
+				// Orijinal markdown bağlantısını yeni yol ile değiştir
+				const fullMatch = match[0];
+				const newPath = imagePathMap[originalPath];
+				const updatedMatch = fullMatch.replace(originalPath, newPath);
+				updatedContent = updatedContent.replace(fullMatch, updatedMatch);
+			}
+		}
+		
+		return updatedContent;
+	}
+	
+	// Resimleri GitHub'a yükle ve içeriği güncelle
+	async processAndUploadImages(file: TFile, content: string): Promise<{content: string, uploadedImages: number}> {
+		if (!this.settings.processImages) {
+			return {content, uploadedImages: 0};
+		}
+		
+		// Resim yollarını çıkar
+		const imageLinks = this.extractImageLinks(content);
+		if (imageLinks.length === 0) {
+			return {content, uploadedImages: 0};
+		}
+		
+		const imagePathMap: Record<string, string> = {};
+		let uploadedImages = 0;
+		
+		for (const imagePath of imageLinks) {
+			try {
+				// Resim dosyasının tam yolunu bul (Obsidian içinde)
+				const imageFile = this.app.vault.getAbstractFileByPath(imagePath);
+				
+				if (imageFile && imageFile instanceof TFile) {
+					// Resim içeriğini oku
+					const imageBuffer = await this.app.vault.readBinary(imageFile);
+					const imageBase64 = Buffer.from(imageBuffer).toString('base64');
+					
+					// GitHub'da hedef resim yolu
+					const imageFileName = imagePath.split('/').pop() || imagePath;
+					const targetImagePath = `${this.settings.imagesFolder}/${imageFileName}`;
+					
+					// Resmi GitHub'a yükle
+					let imageSha: string | undefined = undefined;
+					
+					try {
+						// Resmin GitHub'da var olup olmadığını kontrol et
+						const response = await this.octokit.repos.getContent({
+							owner: this.settings.githubUsername,
+							repo: this.settings.githubRepo,
+							path: targetImagePath,
+						});
+						
+						if (response.data && !Array.isArray(response.data)) {
+							imageSha = response.data.sha;
+						}
+					} catch (e) {
+						// Resim mevcut değil, yeni oluşturulacak
+					}
+					
+					// Resmi GitHub'a yükle
+					await this.octokit.repos.createOrUpdateFileContents({
+						owner: this.settings.githubUsername,
+						repo: this.settings.githubRepo,
+						path: targetImagePath,
+						message: `Upload image ${imageFileName} via Obsidian Publisher`,
+						content: imageBase64,
+						sha: imageSha,
+					});
+					
+					// Yol haritasına ekle
+					const repoBaseUrl = `https://raw.githubusercontent.com/${this.settings.githubUsername}/${this.settings.githubRepo}/main`;
+					imagePathMap[imagePath] = `${repoBaseUrl}/${targetImagePath}`;
+					uploadedImages++;
+				}
+			} catch (error) {
+				console.error(`Error uploading image ${imagePath}:`, error);
+			}
+		}
+		
+		// İçeriği güncellenmiş resim yolları ile döndür
+		const updatedContent = this.updateImagePathsInMarkdown(content, imagePathMap);
+		return {content: updatedContent, uploadedImages};
 	}
 }
 
@@ -856,6 +1037,28 @@ class PublisherSettingTab extends PluginSettingTab {
 				.setValue(this.plugin.settings.languageSuffixKey)
 				.onChange(async (value) => {
 					this.plugin.settings.languageSuffixKey = value || 'lang';
+					await this.plugin.saveSettings();
+				}));
+				
+		// Resim işleme ayarları
+		new Setting(containerEl)
+			.setName('Process Images')
+			.setDesc('When enabled, images in notes will be uploaded to a separate folder on GitHub')
+			.addToggle(toggle => toggle
+				.setValue(this.plugin.settings.processImages)
+				.onChange(async (value) => {
+					this.plugin.settings.processImages = value;
+					await this.plugin.saveSettings();
+				}));
+				
+		new Setting(containerEl)
+			.setName('Images Folder')
+			.setDesc('The folder in your GitHub repository where images will be uploaded')
+			.addText(text => text
+				.setPlaceholder('assets/images')
+				.setValue(this.plugin.settings.imagesFolder)
+				.onChange(async (value) => {
+					this.plugin.settings.imagesFolder = value || 'assets/images';
 					await this.plugin.saveSettings();
 				}));
 		
