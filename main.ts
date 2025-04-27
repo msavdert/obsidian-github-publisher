@@ -2,7 +2,7 @@ import { App, Editor, FrontMatterCache, MarkdownView, Modal, Notice, Plugin, Plu
 import { Octokit } from '@octokit/rest';
 import * as matter from 'gray-matter';
 
-// Obsidian API tipini genişletelim
+// Extended Obsidian API type
 declare module 'obsidian' {
     interface App {
         setting: {
@@ -20,6 +20,9 @@ interface PublisherSettings {
 	excludeFolders: string[]; // Hariç tutulacak klasörler
 	frontmatterKey: string; // Paylaşılacak notları belirlemek için frontmatter anahtarı
 	publishedNotes: Record<string, string>; // Dosya yolu -> Son yayınlanma tarihi
+	useFileHistory: boolean; // Track file history when name changes
+	formatFilename: boolean; // Format filename to be URL-friendly
+	languageSuffixKey: string; // Frontmatter key to specify language suffix
 }
 
 const DEFAULT_SETTINGS: PublisherSettings = {
@@ -29,7 +32,10 @@ const DEFAULT_SETTINGS: PublisherSettings = {
 	publishFolder: 'notes',
 	excludeFolders: [],
 	frontmatterKey: 'share',
-	publishedNotes: {}
+	publishedNotes: {},
+	useFileHistory: true,
+	formatFilename: false,
+	languageSuffixKey: 'lang'
 }
 
 export default class GithubPublisherPlugin extends Plugin {
@@ -184,9 +190,20 @@ export default class GithubPublisherPlugin extends Plugin {
 	}
 
 	// Obsidian'daki yolu GitHub'daki hedef yola dönüştür
-	getTargetPath(path: string): string {
-		// Sadece dosya adını al, klasör yapısını koru
-		const fileName = path.split('/').pop() || path;
+	getTargetPath(file: TFile): string {
+		// Sadece dosya adını al
+		let fileName = file.name;
+		
+		// URL-friendly format uygula (ayarlarda aktif ise)
+		if (this.settings.formatFilename) {
+			fileName = this.formatFilenameAsSlug(fileName);
+		}
+		
+		// Dil seçeneğini kontrol et
+		const languageSuffix = this.getLanguageSuffix(file);
+		if (languageSuffix) {
+			fileName = this.applyLanguageSuffix(fileName, languageSuffix);
+		}
 		
 		// Hedef klasör belirtildiyse ön ek ekle
 		if (this.settings.publishFolder && this.settings.publishFolder !== '/') {
@@ -196,9 +213,67 @@ export default class GithubPublisherPlugin extends Plugin {
 		return fileName;
 	}
 
-	// Yayınlanmış notları kaydet
-	async markNoteAsPublished(filePath: string) {
-		this.settings.publishedNotes[filePath] = new Date().toISOString();
+	// Find the previously published path of a note by checking its content hash
+	async findPreviousNotePath(file: TFile, content: string): Promise<string | null> {
+		if (!this.settings.useFileHistory) {
+			return null;
+		}
+		
+		const contentHash = this.calculateContentHash(content);
+		
+		// Only consider notes that have been published previously
+		const publishedPaths = Object.keys(this.settings.publishedNotes);
+		
+		for (const path of publishedPaths) {
+			// Skip if it's the current path
+			if (path === file.path) continue;
+			
+			try {
+				// Try to find the file in the vault
+				const oldFile = this.app.vault.getAbstractFileByPath(path);
+				// If file doesn't exist anymore, it might have been renamed
+				if (!oldFile || !(oldFile instanceof TFile)) {
+					// Get the content hash if we stored it previously
+					const storedHash = this.getStoredContentHash(path);
+					if (storedHash && storedHash === contentHash) {
+						// Found a match - this is likely the same file that was renamed
+						return path;
+					}
+				}
+			} catch (e) {
+				// File might not exist anymore, just continue
+			}
+		}
+		
+		return null;
+	}
+	
+	// Simple hash function for content comparison
+	calculateContentHash(content: string): string {
+		let hash = 0;
+		for (let i = 0; i < content.length; i++) {
+			const char = content.charCodeAt(i);
+			hash = ((hash << 5) - hash) + char;
+			hash = hash & hash; // Convert to 32bit integer
+		}
+		return hash.toString();
+	}
+	
+	// Store content hash in publishedNotes for future reference
+	getStoredContentHash(path: string): string | null {
+		// We'll extract it from the timestamp field for now (we could enhance this in the future)
+		const timestamp = this.settings.publishedNotes[path];
+		if (timestamp && timestamp.includes(':hash:')) {
+			return timestamp.split(':hash:')[1];
+		}
+		return null;
+	}
+	
+	// Store the content hash when marking a note as published
+	async markNoteAsPublished(filePath: string, contentHash?: string) {
+		const timestamp = new Date().toISOString();
+		this.settings.publishedNotes[filePath] = contentHash ? 
+			`${timestamp}:hash:${contentHash}` : timestamp;
 		await this.saveSettings();
 	}
 
@@ -223,14 +298,25 @@ export default class GithubPublisherPlugin extends Plugin {
 			// Dosya içeriğini oku
 			const content = await this.app.vault.read(file);
 			
+			// İçerik hash'ini hesapla (dosya takibi için)
+			const contentHash = this.calculateContentHash(content);
+			
 			// GitHub'daki hedef yolu belirle
-			const targetPath = this.getTargetPath(file.path);
+			const targetPath = this.getTargetPath(file);
+			
+			// Eğer dosya adı değiştiyse önceki yayınlanmış dosyayı bulmaya çalış
+			let previousPath: string | null = null;
+			if (this.settings.useFileHistory) {
+				previousPath = await this.findPreviousNotePath(file, content);
+			}
 			
 			// Base64 olarak kodla
 			const contentBase64 = this.btoa(content);
 			
 			// GitHub'da dosyanın mevcut olup olmadığını kontrol et
 			let sha: string | undefined = undefined;
+			
+			// Öncelikle aynı adla bir dosya var mı diye kontrol et
 			try {
 				const response = await this.octokit.repos.getContent({
 					owner: this.settings.githubUsername,
@@ -241,11 +327,51 @@ export default class GithubPublisherPlugin extends Plugin {
 					sha = response.data.sha;
 				}
 			} catch (e) {
-				// Dosya mevcut değil, yeni oluşturulacak
+				// Dosya mevcut değil, değişen isimli bir dosya olabilir
+				
+				// Eğer önceki yol bulunduysa, bu dosya adı değişmiş olabilir
+				if (previousPath) {
+					// Önceki dosyanın GitHub'daki hedef yolunu belirle
+					const pathParts = previousPath.split('/');
+					const oldFileName = pathParts[pathParts.length - 1];
+					const oldTargetPath = this.getTargetPath(
+						{name: oldFileName || previousPath} as TFile
+					);
+					
+					try {
+						// Önceki dosyayı GitHub'da bul
+						const oldFileResponse = await this.octokit.repos.getContent({
+							owner: this.settings.githubUsername,
+							repo: this.settings.githubRepo,
+							path: oldTargetPath,
+						});
+						
+						if (oldFileResponse.data && !Array.isArray(oldFileResponse.data)) {
+							// Önceki dosyayı GitHub'dan sil
+							await this.octokit.repos.deleteFile({
+								owner: this.settings.githubUsername,
+								repo: this.settings.githubRepo,
+								path: oldTargetPath,
+								message: `Delete ${oldTargetPath} (renamed to ${file.name})`,
+								sha: oldFileResponse.data.sha,
+							});
+							
+							// Kullanıcıya bildir
+							new Notice(`Previous version at ${oldTargetPath} has been deleted.`);
+							
+							// Önceki dosya kaydını sil
+							delete this.settings.publishedNotes[previousPath];
+							await this.saveSettings();
+						}
+					} catch (error) {
+						// Önceki dosya bulunamadı veya silinemedi, devam et
+						console.log(`Could not delete previous file: ${error.message}`);
+					}
+				}
 			}
 			
 			// Dosyayı GitHub'a yükle
-			const response = await this.octokit.repos.createOrUpdateFileContents({
+			await this.octokit.repos.createOrUpdateFileContents({
 				owner: this.settings.githubUsername,
 				repo: this.settings.githubRepo,
 				path: targetPath,
@@ -254,8 +380,8 @@ export default class GithubPublisherPlugin extends Plugin {
 				sha: sha,
 			});
 			
-			// Yayınlanmış not olarak kaydet
-			await this.markNoteAsPublished(file.path);
+			// Yayınlanmış not olarak kaydet (content hash ile)
+			await this.markNoteAsPublished(file.path, contentHash);
 			
 			new Notice(`Successfully published ${file.name} to GitHub!`);
 		} catch (error) {
@@ -308,6 +434,53 @@ export default class GithubPublisherPlugin extends Plugin {
 		}
 		
 		new Notice(`Published ${successCount} notes to GitHub. ${failCount} failed.`);
+	}
+
+	// Convert a filename to a URL-friendly slug format
+	formatFilenameAsSlug(filename: string): string {
+		if (!this.settings.formatFilename) {
+			return filename;
+		}
+		
+		// Remove file extension
+		let name = filename.replace(/\.md$/, '');
+		
+		// Convert to lowercase
+		name = name.toLowerCase();
+		
+		// Replace spaces with hyphens
+		name = name.replace(/\s+/g, '-');
+		
+		// Remove special characters
+		name = name.replace(/[^\w\-]/g, '');
+		
+		// Add .md extension back
+		return name + '.md';
+	}
+	
+	// Get language suffix from frontmatter if available
+	getLanguageSuffix(file: TFile): string | null {
+		const frontmatter = this.app.metadataCache.getFileCache(file)?.frontmatter;
+		if (frontmatter && this.settings.languageSuffixKey in frontmatter) {
+			const lang = frontmatter[this.settings.languageSuffixKey];
+			if (typeof lang === 'string' && lang.trim().length > 0) {
+				return lang.trim().toLowerCase();
+			}
+		}
+		return null;
+	}
+	
+	// Apply language suffix to filename if specified
+	applyLanguageSuffix(filename: string, languageSuffix: string | null): string {
+		if (!languageSuffix) {
+			return filename;
+		}
+		
+		// Remove .md extension
+		let name = filename.replace(/\.md$/, '');
+		
+		// Add language suffix and .md extension back
+		return `${name}.${languageSuffix}.md`;
 	}
 }
 
@@ -649,6 +822,40 @@ class PublisherSettingTab extends PluginSettingTab {
 				.setValue(this.plugin.settings.frontmatterKey)
 				.onChange(async (value) => {
 					this.plugin.settings.frontmatterKey = value || 'share';
+					await this.plugin.saveSettings();
+				}));
+
+		// Dosya izleme özelliği için ayar
+		containerEl.createEl('h3', {text: 'Advanced Features'});
+
+		new Setting(containerEl)
+			.setName('Track File History')
+			.setDesc('When enabled, the plugin will update existing files on GitHub when a note is renamed in Obsidian')
+			.addToggle(toggle => toggle
+				.setValue(this.plugin.settings.useFileHistory)
+				.onChange(async (value) => {
+					this.plugin.settings.useFileHistory = value;
+					await this.plugin.saveSettings();
+				}));
+
+		new Setting(containerEl)
+			.setName('URL-Friendly Filenames')
+			.setDesc('Convert filenames to a URL-friendly format (lowercase, hyphens instead of spaces, no special characters)')
+			.addToggle(toggle => toggle
+				.setValue(this.plugin.settings.formatFilename)
+				.onChange(async (value) => {
+					this.plugin.settings.formatFilename = value;
+					await this.plugin.saveSettings();
+				}));
+
+		new Setting(containerEl)
+			.setName('Language Suffix Key')
+			.setDesc('The frontmatter key used to specify language suffix (e.g., "en", "tr" to generate file.en.md)')
+			.addText(text => text
+				.setPlaceholder('lang')
+				.setValue(this.plugin.settings.languageSuffixKey)
+				.onChange(async (value) => {
+					this.plugin.settings.languageSuffixKey = value || 'lang';
 					await this.plugin.saveSettings();
 				}));
 		
