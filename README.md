@@ -42,8 +42,8 @@ For beta testers and early adopters:
 
 You need to create a GitHub Personal Access Token (PAT) to use this plugin:
 
-1. Create a [new Personal Access Token](https://github.com/settings/tokens/new) on GitHub
-2. Select "repo" permissions for the token
+1. Create a [new Personal Access Token](https://github.com/settings/personal-access-tokens/new) on GitHub
+2. Select "repo" permissions for the token (Contents - Read and write)
 3. Copy the token and paste it into the plugin settings
 4. Enter your GitHub username and repository name
 5. Use the "Test Connection" button to verify your credentials
